@@ -31,13 +31,6 @@ const MODELS = [
   { id: "deepai", name: "DeepAI", tag: "Simple & Fun", color: "#ff9500", abbr: "DA", desc: "Simple and fun, great for beginners", speed: "~8s", free: true },
 ];
 
-const SAMPLE_IMAGES = [
-  { prompt: "A dragon over neon city", style: "neon-punk" },
-  { prompt: "Japanese garden", style: "anime" },
-  { prompt: "Robot astronaut on Mars", style: "cinematic" },
-  { prompt: "Underwater city", style: "digital-art" },
-];
-
 const PAGES = ["GENERATE", "IMG2IMG", "SUGGESTIONS", "GALLERY"];
 
 export default function App() {
@@ -65,6 +58,28 @@ export default function App() {
   const [img2imgLoading, setImg2imgLoading] = useState(false);
   const [img2imgError, setImg2imgError] = useState("");
 
+  // Waitlist state
+  const [waitlistEmail, setWaitlistEmail] = useState("");
+  const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
+  const [waitlistError, setWaitlistError] = useState("");
+  const [waitlistCount, setWaitlistCount] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("synthai_waitlist")) || []; }
+    catch { return []; }
+  });
+
+  function handleWaitlist() {
+    if (!waitlistEmail.trim() || !waitlistEmail.includes("@")) {
+      setWaitlistError("Please enter a valid email!");
+      return;
+    }
+    const updated = [...waitlistCount, waitlistEmail];
+    setWaitlistCount(updated);
+    try { localStorage.setItem("synthai_waitlist", JSON.stringify(updated)); }
+    catch {}
+    setWaitlistSubmitted(true);
+    setWaitlistError("");
+  }
+
   function saveGallery(items) {
     const updated = [...items, ...gallery];
     setGallery(updated);
@@ -89,20 +104,20 @@ export default function App() {
         if (data.output_url) urls = [data.output_url];
         else setError("DeepAI Error: " + (data.err || "Something went wrong"));
       } else {
-        const endpoint = selectedModel.id === "sdxl-turbo"
-          ? "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image"
-          : "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image";
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${STABILITY_KEY}` },
-          body: JSON.stringify({
-            text_prompts: [{ text: prompt, weight: 1 }, ...(negativePrompt.trim() ? [{ text: negativePrompt, weight: -1 }] : [])],
-            cfg_scale: selectedModel.id === "sdxl-turbo" ? 1 : 7,
-            height: dimension.h, width: dimension.w,
-            samples: numImages, steps: selectedModel.id === "sdxl-turbo" ? 4 : 30,
-            style_preset: style,
-          }),
-        });
+        const response = await fetch(
+          "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${STABILITY_KEY}` },
+            body: JSON.stringify({
+              text_prompts: [{ text: prompt, weight: 1 }, ...(negativePrompt.trim() ? [{ text: negativePrompt, weight: -1 }] : [])],
+              cfg_scale: selectedModel.id === "sdxl-turbo" ? 1 : 7,
+              height: dimension.h, width: dimension.w,
+              samples: numImages, steps: selectedModel.id === "sdxl-turbo" ? 4 : 30,
+              style_preset: style,
+            }),
+          }
+        );
         const data = await response.json();
         if (!response.ok) setError("API Error: " + (data.message || "Something went wrong"));
         else urls = data.artifacts.map((img) => `data:image/png;base64,${img.base64}`);
@@ -192,14 +207,17 @@ export default function App() {
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   }
 
-  // ─── LANDING PAGE ───────────────────────────────────────────────
+  // ─── LANDING PAGE ────────────────────────────────────────────────
   if (screen === "landing") {
     return (
       <div style={s.hub}>
         <div style={s.gridBg} />
         <div style={s.topbar}>
           <div style={s.logo}>SYNTH<span style={{ color: "#00e5ff" }}>AI</span></div>
-          <button onClick={() => setScreen("app")} style={s.launchBtn}>▶ LAUNCH APP</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { setScreen("landing"); document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth" }); }} style={s.navBtn}>PRICING</button>
+            <button onClick={() => setScreen("app")} style={s.launchBtn}>▶ LAUNCH APP</button>
+          </div>
         </div>
 
         {/* HERO */}
@@ -210,7 +228,7 @@ export default function App() {
           <p style={s.heroSub}>Type a prompt, pick a style, generate magic. Powered by Stable Diffusion XL, SDXL Turbo, and more.</p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
             <button onClick={() => setScreen("app")} style={s.heroBtn}>🚀 Start Generating — It's Free</button>
-            <button onClick={() => setScreen("app")} style={s.heroBtn2}>View Gallery →</button>
+            <button onClick={() => document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth" })} style={s.heroBtn2}>View Plans →</button>
           </div>
         </div>
 
@@ -223,7 +241,7 @@ export default function App() {
                 <div style={s.sampleInner}>
                   <div style={{ fontSize: 40 }}>{["🐉", "🌸", "🚀", "🌊"][i]}</div>
                   <div style={s.samplePrompt}>{p}</div>
-                  <div style={{ ...s.styleTag, color: ["#4d9fff", "#ff9de2", "#ff7043", "#00e5ff"][i] }}>{["neon-punk", "anime", "cinematic", "digital-art"][i]}</div>
+                  <div style={{ ...s.styleTagLanding, color: ["#4d9fff", "#ff9de2", "#ff7043", "#00e5ff"][i] }}>{["neon-punk", "anime", "cinematic", "digital-art"][i]}</div>
                 </div>
               </div>
             ))}
@@ -238,10 +256,10 @@ export default function App() {
               <div key={m.id} style={{ ...s.modelCard, borderColor: m.color + "44" }}>
                 <div style={{ ...s.modelLogo, background: m.color + "22", color: m.color }}>{m.abbr}</div>
                 <div style={s.modelName}>{m.name}</div>
-                <div style={{ ...s.modelTag2, color: m.color }}>{m.tag}</div>
+                <div style={{ fontSize: 10, color: m.color, letterSpacing: 1, marginBottom: 6 }}>{m.tag}</div>
                 <div style={s.modelDesc}>{m.desc}</div>
-                <div style={s.modelSpeed}>⚡ {m.speed} per image</div>
-                <div style={{ ...s.freeBadge, background: m.free ? "rgba(0,200,150,0.1)" : "rgba(176,106,255,0.1)", color: m.free ? "#00e5aa" : "#b06aff", border: `1px solid ${m.free ? "rgba(0,200,150,0.3)" : "rgba(176,106,255,0.3)"}` }}>{m.free ? "✅ FREE" : "⭐ PRO"}</div>
+                <div style={{ fontSize: 10, color: "#4d9fff", marginBottom: 8 }}>⚡ {m.speed} per image</div>
+                <div style={{ display: "inline-block", padding: "3px 8px", borderRadius: 3, fontSize: 10, letterSpacing: 1, background: m.free ? "rgba(0,200,150,0.1)" : "rgba(176,106,255,0.1)", color: m.free ? "#00e5aa" : "#b06aff", border: `1px solid ${m.free ? "rgba(0,200,150,0.3)" : "rgba(176,106,255,0.3)"}` }}>{m.free ? "✅ FREE" : "⭐ PRO"}</div>
               </div>
             ))}
           </div>
@@ -268,11 +286,69 @@ export default function App() {
           </div>
         </div>
 
+        {/* PRICING */}
+        <div id="pricing" style={s.section}>
+          <div style={s.sectionLabel}>// PRICING PLANS</div>
+          <div style={s.pricingGrid}>
+
+            {/* FREE PLAN */}
+            <div style={s.pricingCard}>
+              <div style={s.planName}>FREE</div>
+              <div style={s.planPrice}>₹0<span style={s.planPer}>/month</span></div>
+              <div style={s.planDesc}>Perfect for getting started</div>
+              <div style={s.planDivider} />
+              {["10 images per day", "3 AI models", "11 art styles", "Image gallery", "IMG2IMG"].map((f, i) => (
+                <div key={i} style={s.planFeature}><span style={{ color: "#00e5aa" }}>✓</span> {f}</div>
+              ))}
+              <button onClick={() => setScreen("app")} style={{ ...s.heroBtn, width: "100%", marginTop: 20 }}>🚀 Get Started Free</button>
+            </div>
+
+            {/* PRO PLAN */}
+            <div style={{ ...s.pricingCard, border: "1px solid rgba(176,106,255,0.4)", position: "relative", overflow: "hidden" }}>
+              <div style={s.proBadge}>⭐ MOST POPULAR</div>
+              <div style={{ ...s.planName, color: "#b06aff" }}>PRO</div>
+              <div style={s.planPrice}>₹299<span style={s.planPer}>/month</span></div>
+              <div style={s.planDesc}>For serious creators</div>
+              <div style={s.planDivider} />
+              {["Unlimited images", "All 4 AI models", "11 art styles", "Priority generation", "Image gallery", "IMG2IMG", "Early access to new models", "No watermarks"].map((f, i) => (
+                <div key={i} style={s.planFeature}><span style={{ color: "#b06aff" }}>✓</span> {f}</div>
+              ))}
+
+              {/* COMING SOON / WAITLIST */}
+              <div style={s.comingSoonBox}>
+                <div style={s.comingSoonTag}>🔔 COMING SOON</div>
+                <div style={{ fontSize: 12, color: "#5a7a9a", marginBottom: 12, lineHeight: 1.5 }}>Pro plan launching soon! Join the waitlist and get <span style={{ color: "#b06aff" }}>50% off</span> for the first 3 months!</div>
+                {waitlistSubmitted ? (
+                  <div style={s.waitlistSuccess}>
+                    🎉 You're on the list! We'll notify you when Pro launches!
+                  </div>
+                ) : (
+                  <div>
+                    <input
+                      type="email"
+                      placeholder="Enter your email..."
+                      value={waitlistEmail}
+                      onChange={(e) => setWaitlistEmail(e.target.value)}
+                      style={s.waitlistInput}
+                    />
+                    {waitlistError && <div style={{ color: "#ff6b6b", fontSize: 11, marginBottom: 8 }}>{waitlistError}</div>}
+                    <button onClick={handleWaitlist} style={s.waitlistBtn}>🔔 Notify Me When Pro Launches</button>
+                  </div>
+                )}
+                <div style={{ fontSize: 10, color: "#3a5a7a", marginTop: 8, textAlign: "center" }}>
+                  {waitlistCount.length > 0 ? `🔥 ${waitlistCount.length} people already on the waitlist!` : "Be the first to know!"}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         {/* CTA */}
         <div style={s.cta}>
           <div style={s.heroGlow} />
           <h2 style={{ ...s.heroTitle, fontSize: 32, marginBottom: 12 }}>Ready to create?</h2>
-          <p style={s.heroSub}>Join thousands of creators using SynthAI to generate stunning images!</p>
+          <p style={s.heroSub}>Join creators using SynthAI to generate stunning images!</p>
           <button onClick={() => setScreen("app")} style={s.heroBtn}>🚀 Start Generating For Free</button>
         </div>
 
@@ -290,7 +366,7 @@ export default function App() {
     <div style={s.hub}>
       <div style={s.gridBg} />
       <div style={s.topbar}>
-        <div style={s.logo} onClick={() => setScreen("landing")} style={{ ...s.logo, cursor: "pointer" }}>SYNTH<span style={{ color: "#00e5ff" }}>AI</span></div>
+        <div onClick={() => setScreen("landing")} style={{ ...s.logo, cursor: "pointer" }}>SYNTH<span style={{ color: "#00e5ff" }}>AI</span></div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {PAGES.map((p) => (
             <button key={p} onClick={() => setPage(p)} style={{ ...s.navBtn, ...(page === p ? s.navActive : {}) }}>
@@ -369,7 +445,7 @@ export default function App() {
               <input id="fileInput" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
             </div>
             <div style={s.label2}>// TRANSFORMATION PROMPT</div>
-            <textarea style={s.textarea} rows={2} placeholder="e.g. 'Turn into anime style' or 'Make it look like a painting'" value={img2imgPrompt} onChange={(e) => setImg2imgPrompt(e.target.value)} />
+            <textarea style={s.textarea} rows={2} placeholder="e.g. 'Turn into anime style'" value={img2imgPrompt} onChange={(e) => setImg2imgPrompt(e.target.value)} />
             <div style={s.label2}>// STYLE</div>
             <div style={s.styleRow}>{STYLES.map((st) => (<div key={st} onClick={() => setStyle(st)} style={{ ...s.styleChip, border: style === st ? "1px solid #4d9fff" : "1px solid rgba(30,100,255,0.2)", background: style === st ? "rgba(30,100,255,0.2)" : "rgba(5,10,20,0.8)", color: style === st ? "#4d9fff" : "#7aa8d8" }}>{st}</div>))}</div>
             <div style={s.label2}>// STRENGTH <span style={s.labelHint}>(0 = subtle, 1 = drastic)</span></div>
@@ -395,7 +471,6 @@ export default function App() {
         {/* GENERATE */}
         {page === "GENERATE" && (
           <>
-            {/* MODEL SELECTOR */}
             <div style={s.card}>
               <div style={s.label}>// SELECT AI MODEL</div>
               <div style={s.modelsRow}>
@@ -443,7 +518,7 @@ export default function App() {
               <div style={s.label}>// OUTPUT STREAM</div>
               {loading && (<div style={s.loadingWrap}><div style={s.loadingBar}><div style={s.loadingFill} /></div><div style={s.loadingText}>Generating with {selectedModel.name}... {selectedModel.speed}</div></div>)}
               {images.length === 0 && !loading && (<div style={s.emptyState}><div style={{ fontSize: 40, marginBottom: 10 }}>🎨</div><div style={s.emptyText}>Awaiting prompt input...</div></div>)}
-              <div style={s.imagesGrid}>{images.map((url, i) => (<div key={i} style={s.imageCard}><img src={url} alt="Generated" style={s.generatedImg} /><div style={s.imgFooter}><span style={s.modelName2}>#{i + 1} · {selectedModel.name}</span><button onClick={() => downloadImage(url, i)} style={s.downloadBtn}>⬇ Save</button></div></div>))}</div>
+              <div style={s.imagesGrid}>{images.map((url, i) => (<div key={i} style={s.imageCard}><img src={url} alt="Generated" style={s.generatedImg} /><div style={s.imgFooter}><span style={{ fontSize: 10, letterSpacing: 1, color: "#4d9fff" }}>#{i + 1} · {selectedModel.name}</span><button onClick={() => downloadImage(url, i)} style={s.downloadBtn}>⬇ Save</button></div></div>))}</div>
             </div>
           </>
         )}
@@ -477,22 +552,32 @@ const s = {
   sampleCard: { border: "1px solid rgba(30,100,255,0.15)", borderRadius: 6, overflow: "hidden", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" },
   sampleInner: { textAlign: "center", padding: 16 },
   samplePrompt: { fontSize: 11, color: "#c8d8f0", marginTop: 8, lineHeight: 1.4 },
-  styleTag: { fontSize: 10, letterSpacing: 1, marginTop: 6 },
+  styleTagLanding: { fontSize: 10, letterSpacing: 1, marginTop: 6 },
   modelsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 },
   modelsRow: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10, marginBottom: 4 },
   modelCard: { background: "rgba(10,18,35,0.9)", border: "1px solid rgba(30,100,255,0.2)", borderRadius: 6, padding: 16 },
   modelSelectCard: { borderRadius: 4, padding: 12, cursor: "pointer", transition: "all 0.2s" },
   modelLogo: { width: 36, height: 36, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginBottom: 8 },
   modelName: { fontSize: 12, letterSpacing: 1, color: "#c8d8f0", marginBottom: 2 },
-  modelName2: { fontSize: 10, letterSpacing: 1, color: "#4d9fff" },
-  modelTag2: { fontSize: 10, letterSpacing: 1, marginBottom: 6 },
   modelDesc: { fontSize: 11, color: "#5a7a9a", lineHeight: 1.4, marginBottom: 8 },
-  modelSpeed: { fontSize: 10, color: "#4d9fff", marginBottom: 8 },
-  freeBadge: { display: "inline-block", padding: "3px 8px", borderRadius: 3, fontSize: 10, letterSpacing: 1 },
   featuresGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 },
   featureCard: { background: "rgba(10,18,35,0.9)", border: "1px solid rgba(30,100,255,0.15)", borderRadius: 6, padding: 16, textAlign: "center" },
   featureTitle: { fontSize: 13, color: "#c8d8f0", marginBottom: 6, letterSpacing: 1 },
   featureDesc: { fontSize: 11, color: "#5a7a9a", lineHeight: 1.4 },
+  pricingGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 },
+  pricingCard: { background: "rgba(10,18,35,0.9)", border: "1px solid rgba(30,100,255,0.2)", borderRadius: 8, padding: 24 },
+  planName: { fontSize: 12, letterSpacing: 3, color: "#4d9fff", marginBottom: 8 },
+  planPrice: { fontSize: 36, fontWeight: 700, color: "#e8f0ff", marginBottom: 8 },
+  planPer: { fontSize: 14, color: "#5a7a9a", fontWeight: 400 },
+  planDesc: { fontSize: 12, color: "#5a7a9a", marginBottom: 16 },
+  planDivider: { height: 1, background: "rgba(30,100,255,0.15)", marginBottom: 16 },
+  planFeature: { fontSize: 12, color: "#c8d8f0", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 },
+  proBadge: { display: "inline-block", padding: "4px 12px", background: "rgba(176,106,255,0.15)", border: "1px solid rgba(176,106,255,0.3)", borderRadius: 20, fontSize: 10, color: "#b06aff", letterSpacing: 1, marginBottom: 12 },
+  comingSoonBox: { marginTop: 20, padding: 16, background: "rgba(176,106,255,0.05)", border: "1px solid rgba(176,106,255,0.2)", borderRadius: 6 },
+  comingSoonTag: { fontSize: 10, letterSpacing: 2, color: "#b06aff", marginBottom: 8 },
+  waitlistInput: { width: "100%", background: "rgba(5,10,20,0.8)", border: "1px solid rgba(176,106,255,0.3)", borderRadius: 4, color: "#c8d8f0", fontFamily: "monospace", fontSize: 13, padding: "10px 14px", outline: "none", boxSizing: "border-box", marginBottom: 8 },
+  waitlistBtn: { width: "100%", padding: "10px", background: "linear-gradient(135deg, #7b2fff 0%, #b06aff 100%)", border: "none", borderRadius: 4, color: "#fff", fontFamily: "monospace", fontSize: 11, letterSpacing: 1, cursor: "pointer" },
+  waitlistSuccess: { padding: "10px 14px", background: "rgba(0,200,150,0.1)", border: "1px solid rgba(0,200,150,0.3)", borderRadius: 4, fontSize: 12, color: "#00e5aa", lineHeight: 1.5 },
   cta: { position: "relative", textAlign: "center", padding: "60px 28px", borderTop: "1px solid rgba(30,100,255,0.1)", overflow: "hidden" },
   footer: { textAlign: "center", padding: "20px 28px", borderTop: "1px solid rgba(30,100,255,0.1)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 },
   main: { padding: "24px 28px", maxWidth: 900, margin: "0 auto", display: "flex", flexDirection: "column", gap: 20 },
