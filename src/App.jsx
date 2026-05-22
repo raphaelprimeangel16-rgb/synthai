@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 
-const STABILITY_KEY = import.meta.env.VITE_STABILITY_KEY; // 👈 Your stability.ai key here
+const STABILITY_KEY = import.meta.env.VITE_STABILITY_KEY;
 
 const PROMPT_SUGGESTIONS = [
   "A dragon flying over a neon cyberpunk city at night",
@@ -24,9 +24,24 @@ const DIMENSIONS = [
   { label: "4:3 Classic", w: 1152, h: 896 },
 ];
 
+const MODELS = [
+  { id: "sdxl", name: "Stable Diffusion XL", tag: "Best Quality", color: "#4d9fff", abbr: "XL", desc: "Highest quality images, great for detailed art", speed: "~15s", free: true },
+  { id: "sdxl-turbo", name: "SDXL Turbo", tag: "Fastest", color: "#00e5aa", abbr: "⚡", desc: "Super fast generation, great for quick ideas", speed: "~3s", free: true },
+  { id: "sd3", name: "Stable Diffusion 3", tag: "Most Advanced", color: "#b06aff", abbr: "SD3", desc: "Most advanced model, best prompt following", speed: "~20s", free: false },
+  { id: "deepai", name: "DeepAI", tag: "Simple & Fun", color: "#ff9500", abbr: "DA", desc: "Simple and fun, great for beginners", speed: "~8s", free: true },
+];
+
+const SAMPLE_IMAGES = [
+  { prompt: "A dragon over neon city", style: "neon-punk" },
+  { prompt: "Japanese garden", style: "anime" },
+  { prompt: "Robot astronaut on Mars", style: "cinematic" },
+  { prompt: "Underwater city", style: "digital-art" },
+];
+
 const PAGES = ["GENERATE", "IMG2IMG", "SUGGESTIONS", "GALLERY"];
 
 export default function App() {
+  const [screen, setScreen] = useState("landing");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [images, setImages] = useState([]);
@@ -41,8 +56,7 @@ export default function App() {
   const [numImages, setNumImages] = useState(1);
   const [dimension, setDimension] = useState(DIMENSIONS[0]);
   const [copied, setCopied] = useState(false);
-
-  // Img2Img state
+  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [uploadedImageFile, setUploadedImageFile] = useState(null);
   const [img2imgStrength, setImg2imgStrength] = useState(0.5);
@@ -50,37 +64,52 @@ export default function App() {
   const [img2imgResult, setImg2imgResult] = useState(null);
   const [img2imgLoading, setImg2imgLoading] = useState(false);
   const [img2imgError, setImg2imgError] = useState("");
-  const fileInputRef = useRef(null);
 
-  // Save gallery to localStorage whenever it changes
-  useEffect(() => {
-    try { localStorage.setItem("synthai_gallery", JSON.stringify(gallery.slice(0, 50))); }
+  function saveGallery(items) {
+    const updated = [...items, ...gallery];
+    setGallery(updated);
+    try { localStorage.setItem("synthai_gallery", JSON.stringify(updated.slice(0, 50))); }
     catch {}
-  }, [gallery]);
+  }
 
   async function generate() {
     if (!prompt.trim()) { setError("Please type a prompt first!"); return; }
-    if (STABILITY_KEY === "PASTE_YOUR_STABILITY_KEY_HERE") { setError("Please add your Stability AI key!"); return; }
     setLoading(true); setError(""); setImages([]);
     try {
-      const response = await fetch(
-        "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image",
-        {
+      let urls = [];
+      if (selectedModel.id === "deepai") {
+        const formData = new FormData();
+        formData.append("text", prompt);
+        const response = await fetch("https://api.deepai.org/api/text2img", {
+          method: "POST",
+          headers: { "api-key": "quickstart-QUdJIGlzIGF3ZXNvbWU" },
+          body: formData,
+        });
+        const data = await response.json();
+        if (data.output_url) urls = [data.output_url];
+        else setError("DeepAI Error: " + (data.err || "Something went wrong"));
+      } else {
+        const endpoint = selectedModel.id === "sdxl-turbo"
+          ? "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image"
+          : "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image";
+        const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${STABILITY_KEY}` },
           body: JSON.stringify({
             text_prompts: [{ text: prompt, weight: 1 }, ...(negativePrompt.trim() ? [{ text: negativePrompt, weight: -1 }] : [])],
-            cfg_scale: 7, height: dimension.h, width: dimension.w, samples: numImages, steps: 30, style_preset: style,
+            cfg_scale: selectedModel.id === "sdxl-turbo" ? 1 : 7,
+            height: dimension.h, width: dimension.w,
+            samples: numImages, steps: selectedModel.id === "sdxl-turbo" ? 4 : 30,
+            style_preset: style,
           }),
-        }
-      );
-      const data = await response.json();
-      if (!response.ok) { setError("API Error: " + (data.message || "Something went wrong")); }
-      else {
-        const urls = data.artifacts.map((img) => `data:image/png;base64,${img.base64}`);
+        });
+        const data = await response.json();
+        if (!response.ok) setError("API Error: " + (data.message || "Something went wrong"));
+        else urls = data.artifacts.map((img) => `data:image/png;base64,${img.base64}`);
+      }
+      if (urls.length > 0) {
         setImages(urls);
-        const newItems = urls.map((url) => ({ url, prompt, style, dimension: dimension.label, time: new Date().toLocaleTimeString(), type: "txt2img" }));
-        setGallery((prev) => [...newItems, ...prev]);
+        saveGallery(urls.map((url) => ({ url, prompt, style, model: selectedModel.name, dimension: dimension.label, time: new Date().toLocaleTimeString(), type: "txt2img" })));
       }
     } catch { setError("Something went wrong. Check your API key and try again."); }
     setLoading(false);
@@ -91,10 +120,8 @@ export default function App() {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        canvas.width = targetW;
-        canvas.height = targetH;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, targetW, targetH);
+        canvas.width = targetW; canvas.height = targetH;
+        canvas.getContext("2d").drawImage(img, 0, 0, targetW, targetH);
         canvas.toBlob((blob) => resolve(blob), "image/png");
       };
       img.src = URL.createObjectURL(file);
@@ -106,17 +133,9 @@ export default function App() {
       const img = new Image();
       img.onload = () => {
         const ratio = img.width / img.height;
-        const valid = [
-          { w: 1024, h: 1024 }, { w: 1152, h: 896 }, { w: 1216, h: 832 },
-          { w: 1344, h: 768 }, { w: 1536, h: 640 }, { w: 640, h: 1536 },
-          { w: 768, h: 1344 }, { w: 832, h: 1216 }, { w: 896, h: 1152 },
-        ];
-        let best = valid[0];
-        let bestDiff = Math.abs(ratio - valid[0].w / valid[0].h);
-        valid.forEach((d) => {
-          const diff = Math.abs(ratio - d.w / d.h);
-          if (diff < bestDiff) { bestDiff = diff; best = d; }
-        });
+        const valid = [{ w: 1024, h: 1024 }, { w: 1152, h: 896 }, { w: 1216, h: 832 }, { w: 1344, h: 768 }, { w: 640, h: 1536 }, { w: 768, h: 1344 }, { w: 832, h: 1216 }, { w: 896, h: 1152 }];
+        let best = valid[0], bestDiff = Math.abs(ratio - valid[0].w / valid[0].h);
+        valid.forEach((d) => { const diff = Math.abs(ratio - d.w / d.h); if (diff < bestDiff) { bestDiff = diff; best = d; } });
         resolve(best);
       };
       img.src = URL.createObjectURL(file);
@@ -126,13 +145,12 @@ export default function App() {
   async function generateImg2Img() {
     if (!img2imgPrompt.trim()) { setImg2imgError("Please type a prompt!"); return; }
     if (!uploadedImageFile) { setImg2imgError("Please upload an image first!"); return; }
-    if (STABILITY_KEY === "PASTE_YOUR_STABILITY_KEY_HERE") { setImg2imgError("Please add your Stability AI key!"); return; }
     setImg2imgLoading(true); setImg2imgError(""); setImg2imgResult(null);
     try {
-      const formData = new FormData();
       const bestDim = await getNearestDimension(uploadedImageFile);
-    const resizedBlob = await resizeImageToValid(uploadedImageFile, bestDim.w, bestDim.h);
-    formData.append("init_image", resizedBlob, "image.png");
+      const resizedBlob = await resizeImageToValid(uploadedImageFile, bestDim.w, bestDim.h);
+      const formData = new FormData();
+      formData.append("init_image", resizedBlob, "image.png");
       formData.append("init_image_mode", "IMAGE_STRENGTH");
       formData.append("image_strength", img2imgStrength);
       formData.append("text_prompts[0][text]", img2imgPrompt);
@@ -141,17 +159,15 @@ export default function App() {
       formData.append("samples", "1");
       formData.append("steps", "30");
       formData.append("style_preset", style);
-
-      const response = await fetch(
-        "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/image-to-image",
-        { method: "POST", headers: { Accept: "application/json", Authorization: `Bearer ${STABILITY_KEY}` }, body: formData }
-      );
+      const response = await fetch("https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/image-to-image", {
+        method: "POST", headers: { Accept: "application/json", Authorization: `Bearer ${STABILITY_KEY}` }, body: formData,
+      });
       const data = await response.json();
-      if (!response.ok) { setImg2imgError("API Error: " + (data.message || "Something went wrong")); }
+      if (!response.ok) setImg2imgError("API Error: " + (data.message || "Something went wrong"));
       else {
         const url = `data:image/png;base64,${data.artifacts[0].base64}`;
         setImg2imgResult(url);
-        setGallery((prev) => [{ url, prompt: img2imgPrompt, style, dimension: "IMG2IMG", time: new Date().toLocaleTimeString(), type: "img2img" }, ...prev]);
+        saveGallery([{ url, prompt: img2imgPrompt, style, model: "SDXL", dimension: "IMG2IMG", time: new Date().toLocaleTimeString(), type: "img2img" }]);
       }
     } catch { setImg2imgError("Something went wrong. Try again."); }
     setImg2imgLoading(false);
@@ -176,15 +192,105 @@ export default function App() {
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   }
 
-  function clearGallery() {
-    if (window.confirm("Clear all saved images?")) { setGallery([]); }
+  // ─── LANDING PAGE ───────────────────────────────────────────────
+  if (screen === "landing") {
+    return (
+      <div style={s.hub}>
+        <div style={s.gridBg} />
+        <div style={s.topbar}>
+          <div style={s.logo}>SYNTH<span style={{ color: "#00e5ff" }}>AI</span></div>
+          <button onClick={() => setScreen("app")} style={s.launchBtn}>▶ LAUNCH APP</button>
+        </div>
+
+        {/* HERO */}
+        <div style={s.hero}>
+          <div style={s.heroGlow} />
+          <div style={s.heroTag}>✦ AI POWERED IMAGE GENERATION</div>
+          <h1 style={s.heroTitle}>Create Stunning<br /><span style={{ color: "#00e5ff" }}>AI Images</span><br />In Seconds</h1>
+          <p style={s.heroSub}>Type a prompt, pick a style, generate magic. Powered by Stable Diffusion XL, SDXL Turbo, and more.</p>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+            <button onClick={() => setScreen("app")} style={s.heroBtn}>🚀 Start Generating — It's Free</button>
+            <button onClick={() => setScreen("app")} style={s.heroBtn2}>View Gallery →</button>
+          </div>
+        </div>
+
+        {/* SAMPLE IMAGES */}
+        <div style={s.section}>
+          <div style={s.sectionLabel}>// SAMPLE GENERATIONS</div>
+          <div style={s.samplesGrid}>
+            {["A dragon flying over neon cyberpunk city", "Japanese garden with cherry blossoms", "Robot astronaut on Mars", "Underwater city with bioluminescent creatures"].map((p, i) => (
+              <div key={i} style={{ ...s.sampleCard, background: `linear-gradient(135deg, ${["#1a1a4f", "#1a3a1a", "#3a1a1a", "#1a2a3a"][i]} 0%, #080b14 100%)` }}>
+                <div style={s.sampleInner}>
+                  <div style={{ fontSize: 40 }}>{["🐉", "🌸", "🚀", "🌊"][i]}</div>
+                  <div style={s.samplePrompt}>{p}</div>
+                  <div style={{ ...s.styleTag, color: ["#4d9fff", "#ff9de2", "#ff7043", "#00e5ff"][i] }}>{["neon-punk", "anime", "cinematic", "digital-art"][i]}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* MODELS */}
+        <div style={s.section}>
+          <div style={s.sectionLabel}>// AVAILABLE MODELS</div>
+          <div style={s.modelsGrid}>
+            {MODELS.map((m) => (
+              <div key={m.id} style={{ ...s.modelCard, borderColor: m.color + "44" }}>
+                <div style={{ ...s.modelLogo, background: m.color + "22", color: m.color }}>{m.abbr}</div>
+                <div style={s.modelName}>{m.name}</div>
+                <div style={{ ...s.modelTag2, color: m.color }}>{m.tag}</div>
+                <div style={s.modelDesc}>{m.desc}</div>
+                <div style={s.modelSpeed}>⚡ {m.speed} per image</div>
+                <div style={{ ...s.freeBadge, background: m.free ? "rgba(0,200,150,0.1)" : "rgba(176,106,255,0.1)", color: m.free ? "#00e5aa" : "#b06aff", border: `1px solid ${m.free ? "rgba(0,200,150,0.3)" : "rgba(176,106,255,0.3)"}` }}>{m.free ? "✅ FREE" : "⭐ PRO"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* FEATURES */}
+        <div style={s.section}>
+          <div style={s.sectionLabel}>// FEATURES</div>
+          <div style={s.featuresGrid}>
+            {[
+              { icon: "🎨", title: "11 Art Styles", desc: "From cinematic to anime, pixel art to neon punk" },
+              { icon: "⚡", title: "Multiple Models", desc: "Choose from 4 different AI models" },
+              { icon: "🖼️", title: "IMG2IMG", desc: "Transform any photo with AI" },
+              { icon: "📐", title: "Custom Dimensions", desc: "Square, portrait, landscape and more" },
+              { icon: "💾", title: "Auto Gallery", desc: "All your images saved automatically" },
+              { icon: "🚫", title: "Negative Prompts", desc: "Tell AI exactly what to exclude" },
+            ].map((f, i) => (
+              <div key={i} style={s.featureCard}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>{f.icon}</div>
+                <div style={s.featureTitle}>{f.title}</div>
+                <div style={s.featureDesc}>{f.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div style={s.cta}>
+          <div style={s.heroGlow} />
+          <h2 style={{ ...s.heroTitle, fontSize: 32, marginBottom: 12 }}>Ready to create?</h2>
+          <p style={s.heroSub}>Join thousands of creators using SynthAI to generate stunning images!</p>
+          <button onClick={() => setScreen("app")} style={s.heroBtn}>🚀 Start Generating For Free</button>
+        </div>
+
+        {/* FOOTER */}
+        <div style={s.footer}>
+          <div style={s.logo}>SYNTH<span style={{ color: "#00e5ff" }}>AI</span></div>
+          <div style={{ fontSize: 11, color: "#3a5a7a", letterSpacing: 1 }}>POWERED BY STABLE DIFFUSION · BUILT WITH ❤️</div>
+        </div>
+      </div>
+    );
   }
 
+  // ─── APP ─────────────────────────────────────────────────────────
   return (
     <div style={s.hub}>
       <div style={s.gridBg} />
       <div style={s.topbar}>
-        <div style={s.logo}>SYNTH<span style={{ color: "#00e5ff" }}>AI</span></div>
+        <div style={s.logo} onClick={() => setScreen("landing")} style={{ ...s.logo, cursor: "pointer" }}>SYNTH<span style={{ color: "#00e5ff" }}>AI</span></div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {PAGES.map((p) => (
             <button key={p} onClick={() => setPage(p)} style={{ ...s.navBtn, ...(page === p ? s.navActive : {}) }}>
@@ -192,7 +298,10 @@ export default function App() {
             </button>
           ))}
         </div>
-        <div style={s.statusDot}><div style={s.dot} />ALL SYSTEMS ONLINE</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={() => setScreen("landing")} style={s.backBtn}>← Home</button>
+          <div style={s.statusDot}><div style={s.dot} />ONLINE</div>
+        </div>
       </div>
 
       <div style={s.main}>
@@ -201,7 +310,7 @@ export default function App() {
         {page === "SUGGESTIONS" && (
           <div style={s.card}>
             <div style={s.label}>// PROMPT SUGGESTIONS</div>
-            <p style={s.hint}>Click any prompt to load it into the generator!</p>
+            <p style={s.hint}>Click any prompt to load it!</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {PROMPT_SUGGESTIONS.map((p, i) => (
                 <div key={i} onClick={() => { setPrompt(p); setPage("GENERATE"); }} style={s.suggestionRow}>
@@ -218,14 +327,11 @@ export default function App() {
         {page === "GALLERY" && (
           <div style={s.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <div style={s.label}>// IMAGE GALLERY — {gallery.length} IMAGES SAVED</div>
-              {gallery.length > 0 && <button onClick={clearGallery} style={s.clearBtn}>🗑 Clear All</button>}
+              <div style={s.label}>// IMAGE GALLERY — {gallery.length} SAVED</div>
+              {gallery.length > 0 && <button onClick={() => { if (window.confirm("Clear all?")) { setGallery([]); localStorage.removeItem("synthai_gallery"); } }} style={s.clearBtn}>🗑 Clear</button>}
             </div>
             {gallery.length === 0 ? (
-              <div style={s.emptyState}>
-                <div style={{ fontSize: 40, marginBottom: 10 }}>🖼️</div>
-                <div style={s.emptyText}>No images yet — go generate some!</div>
-              </div>
+              <div style={s.emptyState}><div style={{ fontSize: 40, marginBottom: 10 }}>🖼️</div><div style={s.emptyText}>No images yet!</div></div>
             ) : (
               <div style={s.galleryGrid}>
                 {gallery.map((item, i) => (
@@ -235,10 +341,10 @@ export default function App() {
                       <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
                         <span style={{ ...s.typeBadge, background: item.type === "img2img" ? "rgba(0,200,150,0.15)" : "rgba(30,100,255,0.15)", color: item.type === "img2img" ? "#00e5aa" : "#4d9fff", border: item.type === "img2img" ? "1px solid rgba(0,200,150,0.3)" : "1px solid rgba(30,100,255,0.3)" }}>{item.type === "img2img" ? "IMG2IMG" : "TXT2IMG"}</span>
                       </div>
-                      <div style={s.galleryPrompt}>{item.prompt.length > 50 ? item.prompt.slice(0, 50) + "..." : item.prompt}</div>
+                      <div style={s.galleryPrompt}>{item.prompt?.length > 40 ? item.prompt.slice(0, 40) + "..." : item.prompt}</div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                        <span style={s.galleryMeta}>{item.style} · {item.time}</span>
-                        <button onClick={() => downloadImage(item.url, i)} style={s.downloadBtn}>⬇ Save</button>
+                        <span style={s.galleryMeta}>{item.model} · {item.time}</span>
+                        <button onClick={() => downloadImage(item.url, i)} style={s.downloadBtn}>⬇</button>
                       </div>
                     </div>
                   </div>
@@ -252,68 +358,34 @@ export default function App() {
         {page === "IMG2IMG" && (
           <div style={s.card}>
             <div style={s.label}>// IMAGE TO IMAGE</div>
-            <p style={s.hint}>Upload an image and transform it with AI using a prompt!</p>
-
-            <div style={s.uploadBox} onClick={() => fileInputRef.current.click()}>
-              {uploadedImage ? (
-                <img src={uploadedImage} alt="Uploaded" style={{ maxHeight: 200, maxWidth: "100%", borderRadius: 4 }} />
-              ) : (
+            <p style={s.hint}>Upload an image and transform it with AI!</p>
+            <div style={s.uploadBox} onClick={() => document.getElementById("fileInput").click()}>
+              {uploadedImage ? <img src={uploadedImage} alt="Uploaded" style={{ maxHeight: 200, maxWidth: "100%", borderRadius: 4 }} /> : (
                 <div style={{ textAlign: "center", color: "#5a7a9a" }}>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>📁</div>
                   <div style={{ fontSize: 12, letterSpacing: 1 }}>CLICK TO UPLOAD IMAGE</div>
-                  <div style={{ fontSize: 11, marginTop: 4, color: "#3a5a7a" }}>JPG, PNG supported</div>
                 </div>
               )}
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
+              <input id="fileInput" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
             </div>
-
             <div style={s.label2}>// TRANSFORMATION PROMPT</div>
-            <textarea
-              style={s.textarea} rows={2}
-              placeholder="Describe how to transform the image... e.g. 'Turn into anime style' or 'Make it look like a painting'"
-              value={img2imgPrompt}
-              onChange={(e) => setImg2imgPrompt(e.target.value)}
-            />
-
+            <textarea style={s.textarea} rows={2} placeholder="e.g. 'Turn into anime style' or 'Make it look like a painting'" value={img2imgPrompt} onChange={(e) => setImg2imgPrompt(e.target.value)} />
             <div style={s.label2}>// STYLE</div>
-            <div style={s.styleRow}>
-              {STYLES.map((st) => (
-                <div key={st} onClick={() => setStyle(st)} style={{ ...s.styleChip, border: style === st ? "1px solid #4d9fff" : "1px solid rgba(30,100,255,0.2)", background: style === st ? "rgba(30,100,255,0.2)" : "rgba(5,10,20,0.8)", color: style === st ? "#4d9fff" : "#7aa8d8" }}>{st}</div>
-              ))}
-            </div>
-
-            <div style={s.label2}>// TRANSFORMATION STRENGTH <span style={s.labelHint}>(how much to change — 0 = subtle, 1 = drastic)</span></div>
+            <div style={s.styleRow}>{STYLES.map((st) => (<div key={st} onClick={() => setStyle(st)} style={{ ...s.styleChip, border: style === st ? "1px solid #4d9fff" : "1px solid rgba(30,100,255,0.2)", background: style === st ? "rgba(30,100,255,0.2)" : "rgba(5,10,20,0.8)", color: style === st ? "#4d9fff" : "#7aa8d8" }}>{st}</div>))}</div>
+            <div style={s.label2}>// STRENGTH <span style={s.labelHint}>(0 = subtle, 1 = drastic)</span></div>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
               <input type="range" min="0.1" max="0.9" step="0.1" value={img2imgStrength} onChange={(e) => setImg2imgStrength(parseFloat(e.target.value))} style={{ flex: 1, accentColor: "#4d9fff" }} />
-              <span style={{ color: "#4d9fff", fontFamily: "monospace", fontSize: 14, minWidth: 30 }}>{img2imgStrength}</span>
+              <span style={{ color: "#4d9fff", fontFamily: "monospace", fontSize: 14 }}>{img2imgStrength}</span>
             </div>
-
             {img2imgError && <div style={s.error}>⚠️ {img2imgError}</div>}
-
-            <button onClick={generateImg2Img} disabled={img2imgLoading} style={{ ...s.genBtn, width: "100%", opacity: img2imgLoading ? 0.5 : 1 }}>
-              {img2imgLoading ? "⟳ TRANSFORMING..." : "▶ TRANSFORM IMAGE"}
-            </button>
-
-            {img2imgLoading && (
-              <div style={{ ...s.loadingWrap, marginTop: 16 }}>
-                <div style={s.loadingBar}><div style={s.loadingFill} /></div>
-                <div style={s.loadingText}>Transforming your image... ~15 seconds</div>
-              </div>
-            )}
-
+            <button onClick={generateImg2Img} disabled={img2imgLoading} style={{ ...s.genBtn, width: "100%", opacity: img2imgLoading ? 0.5 : 1 }}>{img2imgLoading ? "⟳ TRANSFORMING..." : "▶ TRANSFORM IMAGE"}</button>
+            {img2imgLoading && <div style={{ ...s.loadingWrap, marginTop: 16 }}><div style={s.loadingBar}><div style={s.loadingFill} /></div><div style={s.loadingText}>Transforming... ~15 seconds</div></div>}
             {img2imgResult && (
               <div style={{ marginTop: 16 }}>
                 <div style={s.label}>// RESULT</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <div>
-                    <div style={{ fontSize: 10, color: "#5a7a9a", marginBottom: 6, letterSpacing: 1 }}>ORIGINAL</div>
-                    <img src={uploadedImage} alt="Original" style={{ width: "100%", borderRadius: 4, border: "1px solid rgba(30,100,255,0.2)" }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: "#00e5aa", marginBottom: 6, letterSpacing: 1 }}>TRANSFORMED</div>
-                    <img src={img2imgResult} alt="Result" style={{ width: "100%", borderRadius: 4, border: "1px solid rgba(0,229,170,0.3)" }} />
-                    <button onClick={() => downloadImage(img2imgResult, 0)} style={{ ...s.downloadBtn, marginTop: 8, display: "block" }}>⬇ Save Result</button>
-                  </div>
+                  <div><div style={{ fontSize: 10, color: "#5a7a9a", marginBottom: 6, letterSpacing: 1 }}>ORIGINAL</div><img src={uploadedImage} alt="Original" style={{ width: "100%", borderRadius: 4, border: "1px solid rgba(30,100,255,0.2)" }} /></div>
+                  <div><div style={{ fontSize: 10, color: "#00e5aa", marginBottom: 6, letterSpacing: 1 }}>TRANSFORMED</div><img src={img2imgResult} alt="Result" style={{ width: "100%", borderRadius: 4, border: "1px solid rgba(0,229,170,0.3)" }} /><button onClick={() => downloadImage(img2imgResult, 0)} style={{ ...s.downloadBtn, marginTop: 8, display: "block" }}>⬇ Save</button></div>
                 </div>
               </div>
             )}
@@ -323,64 +395,55 @@ export default function App() {
         {/* GENERATE */}
         {page === "GENERATE" && (
           <>
+            {/* MODEL SELECTOR */}
             <div style={s.card}>
-              <div style={s.label}>// PROMPT MATRIX</div>
-              <div style={{ position: "relative" }}>
-                <textarea style={s.textarea} rows={3} placeholder="Describe your vision... or click SUGGESTIONS!" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-                <button onClick={copyPrompt} style={s.copyBtn}>{copied ? "✅ Copied!" : "📋 Copy"}</button>
-              </div>
-
-              <div style={s.label2}>// NEGATIVE PROMPT <span style={s.labelHint}>(what to EXCLUDE)</span></div>
-              <textarea style={{ ...s.textarea, borderColor: "rgba(255,80,80,0.2)" }} rows={2} placeholder="e.g. blurry, ugly, bad anatomy, watermark..." value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} />
-
-              <div style={s.label2}>// SELECT STYLE</div>
-              <div style={s.styleRow}>
-                {STYLES.map((st) => (
-                  <div key={st} onClick={() => setStyle(st)} style={{ ...s.styleChip, border: style === st ? "1px solid #4d9fff" : "1px solid rgba(30,100,255,0.2)", background: style === st ? "rgba(30,100,255,0.2)" : "rgba(5,10,20,0.8)", color: style === st ? "#4d9fff" : "#7aa8d8" }}>{st}</div>
-                ))}
-              </div>
-
-              <div style={s.label2}>// IMAGE DIMENSIONS</div>
-              <div style={s.styleRow}>
-                {DIMENSIONS.map((d) => (
-                  <div key={d.label} onClick={() => setDimension(d)} style={{ ...s.styleChip, border: dimension.label === d.label ? "1px solid #00e5aa" : "1px solid rgba(30,100,255,0.2)", background: dimension.label === d.label ? "rgba(0,229,170,0.1)" : "rgba(5,10,20,0.8)", color: dimension.label === d.label ? "#00e5aa" : "#7aa8d8" }}>{d.label}</div>
-                ))}
-              </div>
-
-              <div style={s.label2}>// NUMBER OF IMAGES</div>
-              <div style={s.styleRow}>
-                {[1, 2, 3, 4].map((n) => (
-                  <div key={n} onClick={() => setNumImages(n)} style={{ ...s.styleChip, border: numImages === n ? "1px solid #b06aff" : "1px solid rgba(30,100,255,0.2)", background: numImages === n ? "rgba(150,50,255,0.15)" : "rgba(5,10,20,0.8)", color: numImages === n ? "#b06aff" : "#7aa8d8" }}>
-                    {n} {n === 1 ? "IMAGE" : "IMAGES"}
+              <div style={s.label}>// SELECT AI MODEL</div>
+              <div style={s.modelsRow}>
+                {MODELS.map((m) => (
+                  <div key={m.id} onClick={() => setSelectedModel(m)} style={{ ...s.modelSelectCard, border: selectedModel.id === m.id ? `1px solid ${m.color}` : "1px solid rgba(30,100,255,0.2)", background: selectedModel.id === m.id ? m.color + "15" : "rgba(5,10,20,0.8)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <div style={{ ...s.modelLogo, background: m.color + "22", color: m.color, width: 28, height: 28, fontSize: 10 }}>{m.abbr}</div>
+                      <div>
+                        <div style={{ ...s.modelName, fontSize: 11 }}>{m.name}</div>
+                        <div style={{ fontSize: 9, color: m.color, letterSpacing: 1 }}>{m.tag}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 10, color: "#5a7a9a", marginBottom: 4 }}>{m.desc}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 10, color: "#4d9fff" }}>⚡ {m.speed}</span>
+                      <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 2, background: m.free ? "rgba(0,200,150,0.1)" : "rgba(176,106,255,0.1)", color: m.free ? "#00e5aa" : "#b06aff" }}>{m.free ? "FREE" : "PRO"}</span>
+                    </div>
                   </div>
                 ))}
               </div>
+            </div>
 
+            <div style={s.card}>
+              <div style={s.label}>// PROMPT MATRIX</div>
+              <div style={{ position: "relative" }}>
+                <textarea style={s.textarea} rows={3} placeholder="Describe your vision..." value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+                <button onClick={copyPrompt} style={s.copyBtn}>{copied ? "✅ Copied!" : "📋 Copy"}</button>
+              </div>
+              <div style={s.label2}>// NEGATIVE PROMPT <span style={s.labelHint}>(what to EXCLUDE)</span></div>
+              <textarea style={{ ...s.textarea, borderColor: "rgba(255,80,80,0.2)" }} rows={2} placeholder="e.g. blurry, ugly, watermark..." value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} />
+              <div style={s.label2}>// SELECT STYLE</div>
+              <div style={s.styleRow}>{STYLES.map((st) => (<div key={st} onClick={() => setStyle(st)} style={{ ...s.styleChip, border: style === st ? "1px solid #4d9fff" : "1px solid rgba(30,100,255,0.2)", background: style === st ? "rgba(30,100,255,0.2)" : "rgba(5,10,20,0.8)", color: style === st ? "#4d9fff" : "#7aa8d8" }}>{st}</div>))}</div>
+              <div style={s.label2}>// DIMENSIONS</div>
+              <div style={s.styleRow}>{DIMENSIONS.map((d) => (<div key={d.label} onClick={() => setDimension(d)} style={{ ...s.styleChip, border: dimension.label === d.label ? "1px solid #00e5aa" : "1px solid rgba(30,100,255,0.2)", background: dimension.label === d.label ? "rgba(0,229,170,0.1)" : "rgba(5,10,20,0.8)", color: dimension.label === d.label ? "#00e5aa" : "#7aa8d8" }}>{d.label}</div>))}</div>
+              <div style={s.label2}>// NUMBER OF IMAGES</div>
+              <div style={s.styleRow}>{[1, 2, 3, 4].map((n) => (<div key={n} onClick={() => setNumImages(n)} style={{ ...s.styleChip, border: numImages === n ? "1px solid #b06aff" : "1px solid rgba(30,100,255,0.2)", background: numImages === n ? "rgba(150,50,255,0.15)" : "rgba(5,10,20,0.8)", color: numImages === n ? "#b06aff" : "#7aa8d8" }}>{n} {n === 1 ? "IMAGE" : "IMAGES"}</div>))}</div>
               {error && <div style={s.error}>⚠️ {error}</div>}
-
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={() => setPage("SUGGESTIONS")} style={s.suggBtn}>💡 Ideas</button>
-                <button onClick={generate} disabled={loading} style={{ ...s.genBtn, opacity: loading ? 0.5 : 1, flex: 1 }}>
-                  {loading ? `⟳ GENERATING...` : `▶ GENERATE ${numImages} IMAGE${numImages > 1 ? "S" : ""}`}
-                </button>
+                <button onClick={generate} disabled={loading} style={{ ...s.genBtn, opacity: loading ? 0.5 : 1, flex: 1 }}>{loading ? `⟳ GENERATING...` : `▶ GENERATE ${numImages} IMAGE${numImages > 1 ? "S" : ""}`}</button>
               </div>
             </div>
 
             <div style={s.card}>
               <div style={s.label}>// OUTPUT STREAM</div>
-              {loading && (<div style={s.loadingWrap}><div style={s.loadingBar}><div style={s.loadingFill} /></div><div style={s.loadingText}>Generating {numImages} image{numImages > 1 ? "s" : ""}... ~{numImages * 15} seconds</div></div>)}
+              {loading && (<div style={s.loadingWrap}><div style={s.loadingBar}><div style={s.loadingFill} /></div><div style={s.loadingText}>Generating with {selectedModel.name}... {selectedModel.speed}</div></div>)}
               {images.length === 0 && !loading && (<div style={s.emptyState}><div style={{ fontSize: 40, marginBottom: 10 }}>🎨</div><div style={s.emptyText}>Awaiting prompt input...</div></div>)}
-              <div style={s.imagesGrid}>
-                {images.map((url, i) => (
-                  <div key={i} style={s.imageCard}>
-                    <img src={url} alt="Generated" style={s.generatedImg} />
-                    <div style={s.imgFooter}>
-                      <span style={s.modelName}>#{i + 1} · {style} · {dimension.label}</span>
-                      <button onClick={() => downloadImage(url, i)} style={s.downloadBtn}>⬇ Save</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <div style={s.imagesGrid}>{images.map((url, i) => (<div key={i} style={s.imageCard}><img src={url} alt="Generated" style={s.generatedImg} /><div style={s.imgFooter}><span style={s.modelName2}>#{i + 1} · {selectedModel.name}</span><button onClick={() => downloadImage(url, i)} style={s.downloadBtn}>⬇ Save</button></div></div>))}</div>
             </div>
           </>
         )}
@@ -394,12 +457,45 @@ const s = {
   gridBg: { position: "fixed", inset: 0, backgroundImage: "linear-gradient(rgba(30,100,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(30,100,255,0.04) 1px, transparent 1px)", backgroundSize: "40px 40px", pointerEvents: "none" },
   topbar: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 28px", borderBottom: "1px solid rgba(30,100,255,0.2)", background: "rgba(8,11,20,0.95)", position: "sticky", top: 0, zIndex: 10, flexWrap: "wrap", gap: 10 },
   logo: { fontSize: 20, fontWeight: 700, color: "#4d9fff", letterSpacing: 3 },
+  launchBtn: { padding: "8px 20px", background: "linear-gradient(135deg, #1a4fff 0%, #0091cc 100%)", border: "none", borderRadius: 3, color: "#fff", fontFamily: "monospace", fontSize: 12, letterSpacing: 2, cursor: "pointer" },
+  backBtn: { padding: "6px 14px", background: "transparent", border: "1px solid rgba(30,100,255,0.3)", borderRadius: 3, color: "#7aa8d8", fontFamily: "monospace", fontSize: 11, cursor: "pointer" },
   navBtn: { padding: "7px 16px", background: "transparent", border: "1px solid rgba(30,100,255,0.3)", borderRadius: 3, color: "#7aa8d8", fontFamily: "monospace", fontSize: 11, letterSpacing: 1, cursor: "pointer" },
   navActive: { background: "rgba(30,100,255,0.2)", color: "#4d9fff", borderColor: "#4d9fff" },
   galleryBadge: { background: "#4d9fff", color: "#000", borderRadius: 10, padding: "1px 6px", fontSize: 10, marginLeft: 6 },
   statusDot: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, letterSpacing: 1, color: "#00e5aa" },
   dot: { width: 7, height: 7, borderRadius: "50%", background: "#00e5aa" },
-  main: { padding: "24px 28px", maxWidth: 860, margin: "0 auto", display: "flex", flexDirection: "column", gap: 20 },
+  hero: { position: "relative", textAlign: "center", padding: "80px 28px 60px", overflow: "hidden" },
+  heroGlow: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 600, height: 600, background: "radial-gradient(circle, rgba(30,100,255,0.08) 0%, transparent 70%)", pointerEvents: "none" },
+  heroTag: { display: "inline-block", padding: "6px 16px", border: "1px solid rgba(30,100,255,0.3)", borderRadius: 20, fontSize: 11, letterSpacing: 2, color: "#4d9fff", marginBottom: 24 },
+  heroTitle: { fontSize: 52, fontWeight: 700, lineHeight: 1.2, marginBottom: 20, color: "#e8f0ff", fontFamily: "monospace" },
+  heroSub: { fontSize: 16, color: "#5a7a9a", maxWidth: 500, margin: "0 auto 32px", lineHeight: 1.6 },
+  heroBtn: { padding: "14px 28px", background: "linear-gradient(135deg, #1a4fff 0%, #0091cc 100%)", border: "none", borderRadius: 4, color: "#fff", fontFamily: "monospace", fontSize: 13, letterSpacing: 1, cursor: "pointer" },
+  heroBtn2: { padding: "14px 28px", background: "transparent", border: "1px solid rgba(30,100,255,0.4)", borderRadius: 4, color: "#4d9fff", fontFamily: "monospace", fontSize: 13, letterSpacing: 1, cursor: "pointer" },
+  section: { padding: "40px 28px", maxWidth: 900, margin: "0 auto" },
+  sectionLabel: { fontSize: 10, letterSpacing: 2, color: "#4d9fff", marginBottom: 20, textTransform: "uppercase" },
+  samplesGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 },
+  sampleCard: { border: "1px solid rgba(30,100,255,0.15)", borderRadius: 6, overflow: "hidden", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" },
+  sampleInner: { textAlign: "center", padding: 16 },
+  samplePrompt: { fontSize: 11, color: "#c8d8f0", marginTop: 8, lineHeight: 1.4 },
+  styleTag: { fontSize: 10, letterSpacing: 1, marginTop: 6 },
+  modelsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 },
+  modelsRow: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10, marginBottom: 4 },
+  modelCard: { background: "rgba(10,18,35,0.9)", border: "1px solid rgba(30,100,255,0.2)", borderRadius: 6, padding: 16 },
+  modelSelectCard: { borderRadius: 4, padding: 12, cursor: "pointer", transition: "all 0.2s" },
+  modelLogo: { width: 36, height: 36, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginBottom: 8 },
+  modelName: { fontSize: 12, letterSpacing: 1, color: "#c8d8f0", marginBottom: 2 },
+  modelName2: { fontSize: 10, letterSpacing: 1, color: "#4d9fff" },
+  modelTag2: { fontSize: 10, letterSpacing: 1, marginBottom: 6 },
+  modelDesc: { fontSize: 11, color: "#5a7a9a", lineHeight: 1.4, marginBottom: 8 },
+  modelSpeed: { fontSize: 10, color: "#4d9fff", marginBottom: 8 },
+  freeBadge: { display: "inline-block", padding: "3px 8px", borderRadius: 3, fontSize: 10, letterSpacing: 1 },
+  featuresGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 },
+  featureCard: { background: "rgba(10,18,35,0.9)", border: "1px solid rgba(30,100,255,0.15)", borderRadius: 6, padding: 16, textAlign: "center" },
+  featureTitle: { fontSize: 13, color: "#c8d8f0", marginBottom: 6, letterSpacing: 1 },
+  featureDesc: { fontSize: 11, color: "#5a7a9a", lineHeight: 1.4 },
+  cta: { position: "relative", textAlign: "center", padding: "60px 28px", borderTop: "1px solid rgba(30,100,255,0.1)", overflow: "hidden" },
+  footer: { textAlign: "center", padding: "20px 28px", borderTop: "1px solid rgba(30,100,255,0.1)", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 },
+  main: { padding: "24px 28px", maxWidth: 900, margin: "0 auto", display: "flex", flexDirection: "column", gap: 20 },
   card: { background: "rgba(10,18,35,0.9)", border: "1px solid rgba(30,100,255,0.25)", borderRadius: 6, padding: 20 },
   label: { fontSize: 10, letterSpacing: 2, color: "#4d9fff", marginBottom: 10, textTransform: "uppercase" },
   label2: { fontSize: 10, letterSpacing: 2, color: "#4d9fff", marginTop: 16, marginBottom: 8, textTransform: "uppercase" },
@@ -422,7 +518,6 @@ const s = {
   imageCard: { border: "1px solid rgba(30,100,255,0.2)", borderRadius: 4, overflow: "hidden" },
   generatedImg: { width: "100%", display: "block" },
   imgFooter: { padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" },
-  modelName: { fontSize: 10, letterSpacing: 1, color: "#4d9fff" },
   downloadBtn: { color: "#4d9fff", fontSize: 11, background: "none", border: "none", cursor: "pointer", letterSpacing: 1, fontFamily: "monospace" },
   suggestionRow: { display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "rgba(5,10,20,0.8)", border: "1px solid rgba(30,100,255,0.15)", borderRadius: 4, cursor: "pointer" },
   suggestionNum: { fontSize: 11, color: "#4d9fff", letterSpacing: 1, minWidth: 24 },
